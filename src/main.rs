@@ -140,8 +140,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     // This manages the entire network as a whole.
     let mut swarm = {
         // Create a Kademlia behavior
-        let store = MemoryStore::new(local_peer_id.clone());
-        let kademlia = Kademlia::new(local_peer_id.clone(), store);
+        let kademlia = {
+            let store = MemoryStore::new(local_peer_id.clone());
+            Kademlia::new(local_peer_id.clone(), store)
+        };
 
         // Create a mdns behavior
         let mdns = Mdns::new()?;
@@ -164,7 +166,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Create a future to read lines from stdin. TODO: figure out why this
     // needs to be in a future.
     let handler_future = future::poll_fn(move |cx: &mut Context<'_>| {
-        // This loop exists to continuously read from stdin
+        // We want this to be in a loop so that it will always be reading from stdin
         loop {
             // Try to poll the next line from the stdin stream
             match stdin.try_poll_next_unpin(cx)? {
