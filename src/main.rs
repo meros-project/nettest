@@ -13,7 +13,6 @@ use libp2p::{
 use nettest::handler;
 use std::{
     error::Error,
-    io::Read,
     task::{Context, Poll},
 };
 
@@ -154,8 +153,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         Swarm::new(transport, behavior, local_peer_id)
     };
 
-    // Read full lines from stdin
-    // let mut stdin = io::BufReader::new(io::stdin()).lines();
+    // Setup the stdin stream
+    let mut stdin = io::BufReader::new(io::stdin()).lines();
 
     // Listen on all interfaces and whatever port the OS assigns
 
@@ -164,19 +163,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("listening on {:?}", address);
     }
 
-    // Start handling lines from stdin
-    loop {
-        let mut line = String::new();
-        std::io::stdin()
-            .read_to_string(&mut line)
-            .expect("could not read from stdin");
-        eprintln!("I am going to handle a line right now");
-        handler::handle_input_line(&mut swarm.kademlia, line);
-        eprintln!("just handled a line");
-    }
-
-    /*
-    task::block_on(future::poll_fn(move |cx: &mut Context<'_>| {
+    let mut printed_listen = false;
+    // Create a future to read lines from stdin. TODO: figure out why this
+    // needs to be in a future.
+    let handler_future = future::poll_fn(move |cx: &mut Context<'_>| {
         // This loop exists to continuously read from stdin
         loop {
             // Try to poll the next line from the stdin stream
@@ -194,7 +184,40 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
+        // This loop is for TODO: figure it out
+        loop {
+            match swarm.poll_next_unpin(cx) {
+                // If an event happened on the swarm
+                Poll::Ready(Some(event)) => {
+                    println!("AN EVENT IS HAPPENING");
+                    println!("{:?}", event);
+                }
+
+                // Idk
+                Poll::Ready(None) => return Poll::Ready(Ok(())),
+
+                // If nothing is happening in the swarm
+                Poll::Pending => {
+                    if !printed_listen {
+                        // Just print that the node is listening.
+                        // Couldn't have done this right after Swarm::listen
+                        // because that is non-blocking. (i think)
+                        if let Some(a) = Swarm::listeners(&swarm).next() {
+                            println!("Listening on {:?}", a);
+                            printed_listen = true; // Only print this once
+                        }
+                    }
+                    break;
+                }
+            }
+        }
         Poll::Pending
-    }))
-    */
+    });
+
+    // Start handling lines from stdin
+    task::block_on(handler_future)
+
+    //     if let Some(a) = Swarm::listeners(&swarm).next() {
+    //        println!("Listening on {:?}", a);
+    //   }
 }
