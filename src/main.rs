@@ -19,22 +19,22 @@ use std::{
 fn main() -> Result<(), Box<dyn Error>> {
     // Create a new key for this peer's identity
     let local_key = identity::Keypair::generate_ed25519();
-    let local_peer_id = PerrId::from(local_key.public());
+    let local_peer_id = PeerId::from(local_key.public());
 
     // Setup up an encrypted, DNS-enabled TCP transport over
     // the Mplex protocol.
     // TODO: Replace this with a manual, stable, upgraded transport
     let transport = build_development_transport(local_key)?;
 
-    // Create a custom network behavior, combining Kademila and mDNS
+    // Create a custom network behavior, combining Kademlia and mDNS
     #[derive(NetworkBehaviour)]
     struct MyBehavior {
-        kademila: Kademila<MemoryStore>,
+        kademila: Kademlia<MemoryStore>,
         mdns: Mdns, // TODO: Use bootstrapping here as well (for testing)
     }
 
     // Start implementing the necessary handlers for `MyBehavior`,
-    // which includes handlers for both mDNS and Kademila
+    // which includes handlers for both mDNS and Kademlia
     impl NetworkBehaviourEventProcess<MdnsEvent> for MyBehavior {
         // Called when `mdns` (in a MyBehavior instance) produces an event.
         fn inject_event(&mut self, event: MdnsEvent) {
@@ -58,45 +58,77 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    impl NetworkBehaviourEventProcess<KademilaEvent> for MyBehavior {
+    impl NetworkBehaviourEventProcess<KademliaEvent> for MyBehavior {
         // Called when `kademila` (in MyBehavior) produces an event.
-        fn inject_event(&mut self, message: KademilaEvent) {
-            // Kademila DHTs have a few different "messages." A message is just
+        fn inject_event(&mut self, message: KademliaEvent) {
+            // Kademlia DHTs have a few different "messages." A message is just
             // the type of action that is being acted on the dht, such as getting
             // a record or storing a record. Simply put, its just an event.
             match message {
                 // If the event is a `QueryResult`, do something.
                 // A `QueryResult` is an event representing when a query to the
-                // dht has produced a result. Check out libp2p::kad::KademilaEvent
+                // dht has produced a result. Check out libp2p::kad::KademliaEvent
                 // for all the variants. Right now, we only care about the QueryResult
                 // event because that is all that this simple dht needs to support:
                 // putting and retrieving records.
-                KademilaEvent::QueryResult { result, .. } => {
+                KademliaEvent::QueryResult { id, result, stats } => {
                     // The result here is an enum
                     // with its own variants representing the types of query results
                     // that are possible, such as the query being a PUT or a GET.
-
-                    // Match the result,
+                    // There are many things that you can do with a kad dht,
+                    // and queries are simply one of those things
+                    // (and there are different types of them!).
                     match result {
                         // If the query was a record being fetched (and it succeeded),
-                        // do something.
                         QueryResult::GetRecord(Ok(ok)) => {
+                            // For each record that was fetched in all of the fetched
+                            // records...
                             for PeerRecord {
                                 record: Record { key, value, .. },
                                 ..
                             } in ok.records
                             {
+                                // ... do something with the record (print it, in this case)
                                 println!(
-                                    "kad dht: Got record {:?} {:?}",
+                                    "kad dht: got record {:?} {:?} with id {:?} and stats {:?}\n",
                                     std::str::from_utf8(key.as_ref())
                                         .unwrap(),
-                                    std::str::from_utf8(&value).unwrap()
+                                    std::str::from_utf8(&value).unwrap(),
+                                    id, stats,
                                 );
                             }
                         }
+
+                        // If the query was a record being fetched (and it failed)
+                        QueryResult::GetRecord(Err(err)) => {
+                            eprintln!(
+                                "kad dht: failed to get record: {:?}",
+                                err
+                            );
+                        }
+
+                        // If the query was a record being stored (a put)
+                        QueryResult::PutRecord(Ok(PutRecordOk {
+                            key,
+                        })) => {
+                            println!(
+                                "kad dht: successfully put record {:?}",
+                                std::str::from_utf8(key.as_ref()).unwrap()
+                            );
+                        }
+
+                        // If the query was a record being stored (and it failed)
+                        QueryResult::PutRecord(Err(err)) => {
+                            eprintln!(
+                                "kad dht: failed to put record: {:?}",
+                                err
+                            );
+                        }
+                        _ => {} // We only care about getting and putting
                     }
                 }
-            }
-        }
-    }
+                _ => {} // We only need to worry about queries to this dht
+            } // end big match
+        } // end method
+    } // end impl
 }
