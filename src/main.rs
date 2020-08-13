@@ -24,12 +24,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Setup up an encrypted, DNS-enabled TCP transport over
     // the Mplex protocol.
     // TODO: Replace this with a manual, stable, upgraded transport
+    // like the one constructed in `transport.rs`
     let transport = build_development_transport(local_key)?;
 
     // Create a custom network behavior, combining Kademlia and mDNS
     #[derive(NetworkBehaviour)]
     struct MyBehavior {
-        kademila: Kademlia<MemoryStore>,
+        kademlia: Kademlia<MemoryStore>,
         mdns: Mdns, // TODO: Use bootstrapping here as well (for testing)
     }
 
@@ -52,7 +53,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         "mDNS: discovered peer {:?} {:?}",
                         &peer_id, &multiaddr
                     );
-                    self.kademila.add_address(&peer_id, multiaddr);
+                    self.kademlia.add_address(&peer_id, multiaddr);
                 }
             }
         }
@@ -131,4 +132,51 @@ fn main() -> Result<(), Box<dyn Error>> {
             } // end big match
         } // end method
     } // end impl
+
+    // The custom network behavior implementation is finished. Now it is time to
+    // use it, which is done by building a `Swarm`.
+
+    // Create a swarm to manage peers and events on those peers.
+    // This manages the entire network as a whole.
+    let mut swarm = {
+        // Create a Kademlia behavior
+        let store = MemoryStore::new(local_peer_id.clone());
+        let kademlia = Kademlia::new(local_peer_id.clone(), store);
+
+        // Create a mdns behavior
+        let mdns = Mdns::new()?;
+
+        // Instantiate the custom network behavior `MyBehavior`
+        let behavior = MyBehavior { kademlia, mdns };
+
+        // Create a new swarm with the transport, behavior, and local peer identity
+        Swarm::new(transport, behavior, local_peer_id)
+    };
+
+    // Read full lines from stdin
+    let mut stdin = io::BufReader::new(io::stdin()).lines();
+
+    // Listen on all interfaces and whatever port the OS assigns
+    Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/0".parse()?)?;
+
+    // Kick it off
+    let mut listening = false;
+    task::block_on(future::poll_fn(move |cx: &mut Context<'_>| {
+        loop {
+            match stdin.try_poll_next_unpin(cx)? {
+                Poll::Ready(Some(line)) => {
+                    handle_input_line(&mut swarm.kademlia, line)
+                }
+                Poll::Ready(None) => panic!("stdin closed"),
+                Poll::Pending => break,
+            }
+        }
+        loop {
+            match swarm.poll_next_unpin(cx) {
+                Poll::Ready(Some(event)) => println!("event {:?}", event),
+                Poll::Ready(None) => return Poll::Ready(Ok()),
+                Poll::Pending => break,
+            }
+        }
+    }))
 }
