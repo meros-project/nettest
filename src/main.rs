@@ -13,6 +13,7 @@ use libp2p::{
 use nettest::handler;
 use std::{
     error::Error,
+    io::Read,
     task::{Context, Poll},
 };
 
@@ -154,13 +155,27 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     // Read full lines from stdin
-    let mut stdin = io::BufReader::new(io::stdin()).lines();
+    // let mut stdin = io::BufReader::new(io::stdin()).lines();
 
     // Listen on all interfaces and whatever port the OS assigns
-    Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/0".parse()?)?;
 
-    // Start listening and acting on the swarm? I guess? idk yet.
-    let mut listening = false;
+    Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/0".parse()?)?;
+    if let Some(address) = Swarm::listeners(&swarm).next() {
+        println!("listening on {:?}", address);
+    }
+
+    // Start handling lines from stdin
+    loop {
+        let mut line = String::new();
+        std::io::stdin()
+            .read_to_string(&mut line)
+            .expect("could not read from stdin");
+        eprintln!("I am going to handle a line right now");
+        handler::handle_input_line(&mut swarm.kademlia, line);
+        eprintln!("just handled a line");
+    }
+
+    /*
     task::block_on(future::poll_fn(move |cx: &mut Context<'_>| {
         // This loop exists to continuously read from stdin
         loop {
@@ -181,4 +196,5 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         Poll::Pending
     }))
+    */
 }

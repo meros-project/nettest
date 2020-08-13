@@ -6,11 +6,17 @@ use libp2p::{
     },
 };
 
+use std::fs::File;
+use std::io::prelude::*;
+
 pub fn handle_input_line(
     kademlia: &mut Kademlia<MemoryStore>,
     line: String,
 ) {
-    println!("handling a line");
+    File::create("output.log")
+        .unwrap()
+        .write_all(b"handling a line!")
+        .unwrap();
 
     let mut args = line.split(" ");
     match args.next() {
