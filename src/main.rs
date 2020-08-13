@@ -3,14 +3,14 @@ use futures::prelude::*;
 use libp2p::{
     build_development_transport, identity,
     kad::{
-        record::{store::MemoryStore, Key},
-        Kademlia, KademliaEvent, PeerRecord, PutRecordOk, QueryResult,
-        Quorum, Record,
+        record::store::MemoryStore, Kademlia, KademliaEvent, PeerRecord,
+        PutRecordOk, QueryResult, Record,
     },
     mdns::{Mdns, MdnsEvent},
     swarm::NetworkBehaviourEventProcess,
     NetworkBehaviour, PeerId, Swarm,
 };
+use nettest::handler;
 use std::{
     error::Error,
     task::{Context, Poll},
@@ -49,10 +49,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // discovered, add that peer's identity information to the
                 // kad dht's list of identities.
                 for (peer_id, multiaddr) in list_of_peers {
-                    println!(
-                        "mDNS: discovered peer {:?} {:?}",
-                        &peer_id, &multiaddr
-                    );
+                    // println!(
+                    //     "mDNS: discovered peer {:?} {:?}",
+                    //     &peer_id, &multiaddr
+                    // );
                     self.kademlia.add_address(&peer_id, multiaddr);
                 }
             }
@@ -159,86 +159,26 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Listen on all interfaces and whatever port the OS assigns
     Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/0".parse()?)?;
 
-    // Kick it off
+    // Start listening and acting on the swarm? I guess? idk yet.
     let mut listening = false;
     task::block_on(future::poll_fn(move |cx: &mut Context<'_>| {
+        // This loop exists to continuously read from stdin
         loop {
+            // Try to poll the next line from the stdin stream
             match stdin.try_poll_next_unpin(cx)? {
+                // If stdin received a full line, handle it.
                 Poll::Ready(Some(line)) => {
-                    handle_input_line(&mut swarm.kademlia, line)
+                    handler::handle_input_line(&mut swarm.kademlia, line)
                 }
+
+                // If stdin broke
                 Poll::Ready(None) => panic!("stdin closed"),
+
+                // If there is no line that was entered, break out of the loop
                 Poll::Pending => break,
             }
         }
-        loop {
-            match swarm.poll_next_unpin(cx) {
-                Poll::Ready(Some(event)) => {
-                    println!("swarm: event {:?}", event)
-                }
-                Poll::Ready(None) => return Poll::Ready(Ok(())),
-                Poll::Pending => {
-                    if !listening {
-                        if let Some(a) = Swarm::listeners(&swarm).next() {
-                            println!("swarm: listening on {:?}", a);
-                            listening = true;
-                        }
-                    }
-                    break;
-                }
-            }
-        }
+
         Poll::Pending
     }))
-}
-
-// Just a driver.
-fn handle_input_line(kademlia: &mut Kademlia<MemoryStore>, line: String) {
-    println!("handling a line");
-
-    let mut args = line.split(" ");
-    match args.next() {
-        Some("GET") => {
-            let key = match args.next() {
-                Some(key) => Key::new(&key),
-                None => {
-                    eprintln!("expected a key");
-                    return;
-                }
-            };
-
-            kademlia.get_record(&key, Quorum::One);
-        }
-        Some("PUT") => {
-            let key = match args.next() {
-                Some(key) => Key::new(&key),
-                None => {
-                    eprintln!("Expected a key");
-                    return;
-                }
-            };
-
-            let value = match args.next() {
-                Some(value) => value.as_bytes().to_vec(),
-                None => {
-                    eprintln!("Expected value");
-                    return;
-                }
-            };
-
-            let record = Record {
-                key,
-                value,
-                publisher: None,
-                expires: None,
-            };
-
-            kademlia
-                .put_record(record, Quorum::One)
-                .expect("Failed to store record locally");
-        }
-        _ => {
-            eprintln!("Expected GET or PUT");
-        }
-    }
 }
